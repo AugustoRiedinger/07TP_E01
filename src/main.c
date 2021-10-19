@@ -52,17 +52,11 @@ uint32_t DigCount;
 /*Variable almacenar la conversion de cuenta digital a volts:*/
 float 	 VoltEq;
 
+/*Variable para almacenar el tiempo medido:*/
+uint32_t MeasuredTime = 0;
+
 int main(void)
 {
-/*------------------------------------------------------------------------------
-DECLARACION DE VARIABLES:
-------------------------------------------------------------------------------*/
-	char 	BufferADC[100];
-	char 	BufferVoltEq[100];
-
-	int 	ADConv;
-	int  	i;
-
 /*------------------------------------------------------------------------------
 CONFIGURACION DEL MICRO:
 ------------------------------------------------------------------------------*/
@@ -83,7 +77,20 @@ BUCLE PRINCIPAL:
 ------------------------------------------------------------------------------*/
     while (1)
     {
+		/*Se inicializa el codigo para medir tiempos:*/
+		DWT->CTRL |= 1; // enable the counter
+		DWT->CYCCNT = 0; // reset the counter
 
+		/*Se lee el valor de cuenta digital en el ADC:*/
+		DigCount = READ_ADC(ADC_Port, ADC_Pin);
+
+		/*Conversion a voltaje equivalente:*/
+		VoltEq = (float) ADConv * MaxVoltADC / MaxDigCount;
+
+		/*Se termina el codigo para medir tiempos y se guarda el resultado:*/
+		MeasuredTime = DWT->CYCCNT;
+		/*Se substrae el ciclo utilizada para transferir CYCCNT a la variable:*/
+		MeasuredTime--;
     }
 }
 
@@ -96,12 +103,30 @@ void TIM3_IRQHandler(void)
 	if (TIM_GetITStatus(TIM3, TIM_IT_CC1) != RESET) {
 		TIM_ClearITPendingBit(TIM3, TIM_IT_CC1);
 
-		/*Se lee el valor de cuenta digital en el ADC:*/
-		DigCount = READ_ADC(ADC_Port, ADC_Pin);
+		/*Buffers para almacenamiento de datos:*/
+		char BufferDigCount[BufferLength];
+		char BufferVoltEq[BufferLength];
+		char BufferMeasuredTime[BufferLength];
 
-		/*Conversion a voltaje equivalente:*/
-    	VoltEq = (float) ADConv * 3 / 4095;
+		/*Refresco del LCD: */
+		CLEAR_LCD_2x16(LCD_2X16);
 
+		/*Copiado de los valores en las variables a los buffers:*/
+		sprintf(BufferDigCount, "%d", DigCount);
+		sprintf(BufferVoltEq, "%.2f", VoltEq);
+		sprintf(BufferMeasuredTime, "%d", MeasuredTime);
+
+		/*Mensaje para mostrar las cuentas digitales del ADC:*/
+		PRINT_LCD_2x16(LCD_2X16, 0, 0, "Dig=");
+		PRINT_LCD_2x16(LCD_2X16, 4, 0, BufferDigCount);
+
+		/*Mensaje para mostrar el valor medido real en el ADC:*/
+		PRINT_LCD_2x16(LCD_2X16, 6, 0, "Volt=");
+		PRINT_LCD_2x16(LCD_2X16, 11, 0, BufferVoltEq);
+
+		/*Mensaje para mostrar el tiempo de la operacion:*/
+		PRINT_LCD_2x16(LCD_2X16, 0, 1, "T-Dig:");
+		PRINT_LCD_2x16(LCD_2X16, 6, 0, BufferMeasuredTime);
 	}
 }
 
