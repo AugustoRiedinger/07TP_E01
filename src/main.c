@@ -3,41 +3,54 @@
   * @author  G. Garcia & A. Riedinger.
   * @version 0.1
   * @date    27-06-21
-  * @brief   Mide la tensión en un PIN analogico y la muestra en un LCD.
+  * @brief   Mide la tensión en un PIN analogico y la muestra en un LCD. Se
+  * 		 analiza el tiempo que dura esta accion.
 
   * SALIDAS:
-
-  	  *	LCD:
-  	  	  *RS -> PC10
-  	  	  *E  -> PC11
-  	  	  *D4 -> PC12
-  	  	  *D5 -> PD2
-  	  	  *D6 -> PF6
-  	  	  *D7 -> PF7
-
+  	  *	LCD		Pines Convencionales
   * ENTRADAS:
-
-  	  * ADC -> PC0
+  	  * ADC		PC0
 */
 /*------------------------------------------------------------------------------
 LIBRERIAS:
 ------------------------------------------------------------------------------*/
-#include "stm32f4xx.h"
-#include "stm32f4xx_gpio.h"
-#include "stm32f4xx_rcc.h"
-#include "stdio.h"						//Uso de funciones basicas de c como sprintf
-#include "adc.h"						//Uso de conversores analogico-digital
-#include "stm32_ub_lcd_2x16.h"			//Uso del Display LCD 2x16
+#include "mi_libreria.h"
 
 /*------------------------------------------------------------------------------
 DEFINICIONES:
 ------------------------------------------------------------------------------*/
-#define InitDelay 100e5
+/*Pines del ADC - PC0:*/
+#define ADC_Port GPIOC
+#define ADC_Pin  GPIO_Pin_0
+
+/*Parámetros de configuración del TIM3 para refresco del LCD:*/
+#define Freq 	 4
+#define TimeBase 200e3
+
+/*Maximo voltaje en el pin del ADC:*/
+#define MaxVoltADC	3
+
+/*Maximo valor de cuentas digitales:*/
+#define MaxDigCount 4095
 
 /*------------------------------------------------------------------------------
-DECLARACION DE FUNCIONES:
+VARIABLES GLOBALES:
 ------------------------------------------------------------------------------*/
-void DELAY(volatile uint32_t n);
+/*Definicion de los pines del LCD: */
+LCD_2X16_t LCD_2X16[] = {
+			// Name  , PORT ,   PIN      ,         CLOCK       ,   Init
+			{ TLCD_RS, GPIOC, GPIO_Pin_10, RCC_AHB1Periph_GPIOC, Bit_RESET },
+			{ TLCD_E,  GPIOC, GPIO_Pin_11, RCC_AHB1Periph_GPIOC, Bit_RESET },
+			{ TLCD_D4, GPIOC, GPIO_Pin_12, RCC_AHB1Periph_GPIOC, Bit_RESET },
+			{ TLCD_D5, GPIOD, GPIO_Pin_2,  RCC_AHB1Periph_GPIOD, Bit_RESET },
+			{ TLCD_D6, GPIOF, GPIO_Pin_6,  RCC_AHB1Periph_GPIOF, Bit_RESET },
+			{ TLCD_D7, GPIOF, GPIO_Pin_7,  RCC_AHB1Periph_GPIOF, Bit_RESET }, };
+
+/*Variable para almacenar el valor de cuenta digital del ADC:*/
+uint32_t DigCount;
+
+/*Variable almacenar la conversion de cuenta digital a volts:*/
+float 	 VoltEq;
 
 int main(void)
 {
@@ -47,60 +60,48 @@ DECLARACION DE VARIABLES:
 	char 	BufferADC[100];
 	char 	BufferVoltEq[100];
 
-	float  	VoltEq;
-
 	int 	ADConv;
 	int  	i;
 
 /*------------------------------------------------------------------------------
 CONFIGURACION DEL MICRO:
 ------------------------------------------------------------------------------*/
-//Inicializacion de los puertos analogicos:
-	ADC_INIT();
-
-//Inicializacion del DISPLAY LCD:
 	SystemInit();
-	UB_LCD_2x16_Init();
+
+	/*Inicializacion PC0 como ADC:*/
+	INIT_ADC(ADC_Port, ADC_Pin);
+
+	/*Inicializacion del DISPLAY LCD:*/
+	INIT_LCD_2x16(LCD_2X16);
+
+	/*Inicialización del TIM3 para refresco del LCD:*/
+	INIT_TIM3();
+	SET_TIM3(TimeBase, Freq);
 
 /*------------------------------------------------------------------------------
 BUCLE PRINCIPAL:
 ------------------------------------------------------------------------------*/
     while (1)
     {
-    	//Refresco del DISPLAY:
-    	DELAY(InitDelay);
-    	UB_LCD_2x16_Clear();
 
-    	//Lectura del pin analogico y conversion a int:
-    	ADConv = READ_ADC1();
-
-    	//Conversion de digital a voltaje. 4095 es la cuenta al maximo.
-    	//Si 4095 cuentas digitales equivalen a 3V, entonces
-    	//el valor actual de cuentas digitales equivale a VoltEq:
-    	VoltEq = (float) ADConv * 3 / 4095;
-
-    	//Conversion de los valores enteros a string y almacenado en buffers:
-    	sprintf(BufferADC, "CTS:%d", ADConv);
-    	sprintf(BufferVoltEq, "%.2f",  VoltEq);
-
-    	//Muestra de los valores almacenados en el DISPLAY:
-    	UB_LCD_2x16_String(0 , 0, BufferADC);
-    	UB_LCD_2x16_String(9 , 0, "|");
-    	UB_LCD_2x16_String(11, 0, BufferVoltEq);
-    	UB_LCD_2x16_String(15, 0, "V");
-
-    	//Creacion de la barrita en la segunda fila.
-    	//Si 3V equivalen a 16 barritas, el voltaje actual equivale a i.
-    	//Luego, se disminuye i en cada pasada hasta llegar al principio del LCD:
-    	for (i = VoltEq * 16 / 3 ; i >=0 ; i--)
-    	    UB_LCD_2x16_String(i,1,".");
     }
 }
 
 /*------------------------------------------------------------------------------
-FUNCIONES:
+INTERRUPCIONES:
 ------------------------------------------------------------------------------*/
-void DELAY(volatile uint32_t n)
+/*Interrupción por agotamiento de cuenta del TIM3 cada 250mseg (4 Hz):*/
+void TIM3_IRQHandler(void)
 {
-  while(n--) {};
+	if (TIM_GetITStatus(TIM3, TIM_IT_CC1) != RESET) {
+		TIM_ClearITPendingBit(TIM3, TIM_IT_CC1);
+
+		/*Se lee el valor de cuenta digital en el ADC:*/
+		DigCount = READ_ADC(ADC_Port, ADC_Pin);
+
+		/*Conversion a voltaje equivalente:*/
+    	VoltEq = (float) ADConv * 3 / 4095;
+
+	}
 }
+
