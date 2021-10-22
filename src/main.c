@@ -128,7 +128,7 @@ void TIM3_IRQHandler(void)
 		/*Mensaje para mostrar el valor medido real en el ADC:*/
 		PRINT_LCD_2x16(LCD_2X16, 10, 0, "V=");
 		PRINT_LCD_2x16(LCD_2X16, 12, 0, BufferVoltEq);
-
+		/**/
 		/*Mensaje para mostrar el tiempo de la operacion:*/
 		PRINT_LCD_2x16(LCD_2X16, 0, 1, "T-Dig:");
 		PRINT_LCD_2x16(LCD_2X16, 6, 1, BufferMeasuredTime);
