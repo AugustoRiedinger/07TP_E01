@@ -721,7 +721,7 @@ void SET_TIM3(uint32_t TimeBase, uint32_t Freq)
 
 	//Actualización de los valores del TIM4:
 	SystemCoreClockUpdate();
-	TIM_ITConfig(TIM3, TIM_IT_CC1, DISABLE);
+	TIM_ITConfig(TIM3, TIM_IT_Update, DISABLE);
 	TIM_Cmd(TIM3, DISABLE);
 
 	/* Compute the prescaler value */
@@ -736,7 +736,7 @@ void SET_TIM3(uint32_t TimeBase, uint32_t Freq)
 	TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure);
 
 	/* TIM Interrupts enable */
-	TIM_ITConfig(TIM3, TIM_IT_CC1, ENABLE);
+	TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE);
 
 	/* TIM3 enable counter */
 	TIM_Cmd(TIM3, ENABLE);

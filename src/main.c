@@ -23,9 +23,6 @@ DEFINICIONES:
 #define Freq 	 4
 #define TimeBase 200e3
 
-/*Lectura ADC cada 2 segundos con ticks cada 250mseg:*/
-#define TicksADC 8
-
 /*Pines del ADC - PC0:*/
 #define ADC_Port GPIOC
 #define ADC_Pin  GPIO_Pin_0
@@ -35,6 +32,9 @@ DEFINICIONES:
 
 /*Maximo valor de cuentas digitales:*/
 #define MaxDigCount 4095
+
+/*Ciclos de lectura maximo:*/
+#define Cycles	100
 
 /*------------------------------------------------------------------------------
 DECLARACION TAREAS:
@@ -54,8 +54,8 @@ LCD_2X16_t LCD_2X16[] = {
 			{ TLCD_D6, GPIOF, GPIO_Pin_6,  RCC_AHB1Periph_GPIOF, Bit_RESET },
 			{ TLCD_D7, GPIOF, GPIO_Pin_7,  RCC_AHB1Periph_GPIOF, Bit_RESET }, };
 
-/*Variable para contar los ticks para leer el ADC:*/
-uint32_t TicksADC_Count = 0;
+/*Variable para contar las veces que se leyo el ADC:*/
+uint32_t ADC_Count = 0;
 
 /*Variable para almacenar el valor de cuenta digital del ADC:*/
 uint32_t DigCount;
@@ -65,6 +65,11 @@ float 	 VoltEq;
 
 /*Variable para almacenar el tiempo medido:*/
 uint32_t MeasuredTime = 0;
+
+/*Variable para transformar el timepo medido a segundos:*/
+double Time;
+int    TimeU;
+double TimeD;
 
 int main(void)
 {
@@ -88,11 +93,30 @@ BUCLE PRINCIPAL:
 ------------------------------------------------------------------------------*/
     while (1)
     {
-    	/*Task scheduler:*/
+    	/*Definicion de la estructura para contar ciclos:*/
+    	CoreDebug -> DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+    	DWT -> CTRL |= DWT_CTRL_CYCCNTENA_Msk;
 
-    	/*Lectura del ADC cada 2 segundos:*/
-    	if (TicksADC_Count == TicksADC)
-    		_ADC();
+    	/*Se reseta el contador:*/
+    	DWT -> CYCCNT = 0;
+
+    	/*Se lee el valor de cuenta digital en el ADC segun Cycles:*/
+    	for (ADC_Count = 0; ADC_Count <= Cycles; ADC_Count++)
+			DigCount = READ_ADC(ADC_Port, ADC_Pin);
+
+    	/*Conversion a voltaje equivalente:*/
+		VoltEq = (float) DigCount * MaxVoltADC / MaxDigCount;
+
+		/*Se termina el codigo para medir tiempos y se guarda el resultado:*/
+		MeasuredTime = DWT->CYCCNT;
+
+		/*Se substrae el ciclo utilizada para transferir CYCCNT a la variable:*/
+		MeasuredTime--;
+
+		/*Se convierte el tiempo de medida digital a microsegundos:*/
+		Time = (double) MeasuredTime * 1.0 / 180;
+		TimeU = (int) Time;
+		TimeD = (Time - (double) TimeU) * 10.0;
     }
 }
 
@@ -102,16 +126,14 @@ INTERRUPCIONES:
 /*Interrupción por agotamiento de cuenta del TIM3 cada 250mseg (4 Hz):*/
 void TIM3_IRQHandler(void)
 {
-	if (TIM_GetITStatus(TIM3, TIM_IT_CC1) != RESET) {
-		TIM_ClearITPendingBit(TIM3, TIM_IT_CC1);
+	if (TIM_GetITStatus(TIM3, TIM_IT_Update) != RESET) {
+		TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
 
 		/*Buffers para almacenamiento de datos:*/
 		char BufferDigCount[BufferLength];
 		char BufferVoltEq[BufferLength];
-		char BufferMeasuredTime[BufferLength];
-
-		/*Aumento de los ticks para la lectura del ADC:*/
-		TicksADC_Count++;
+		char BufferMeasuredTime[1000];
+		char BufferADC_Count[BufferLength];
 
 		/*Refresco del LCD: */
 		CLEAR_LCD_2x16(LCD_2X16);
@@ -119,7 +141,8 @@ void TIM3_IRQHandler(void)
 		/*Copiado de los valores en las variables a los buffers:*/
 		sprintf(BufferDigCount, "%d", DigCount);
 		sprintf(BufferVoltEq, "%.2f", VoltEq);
-		sprintf(BufferMeasuredTime, "%d", MeasuredTime);
+		sprintf(BufferMeasuredTime, "%d.%.2d", TimeU,TimeD);
+		sprintf(BufferADC_Count, "%d", ADC_Count);
 
 		/*Mensaje para mostrar las cuentas digitales del ADC:*/
 		PRINT_LCD_2x16(LCD_2X16, 0, 0, "Dig=");
@@ -128,33 +151,17 @@ void TIM3_IRQHandler(void)
 		/*Mensaje para mostrar el valor medido real en el ADC:*/
 		PRINT_LCD_2x16(LCD_2X16, 10, 0, "V=");
 		PRINT_LCD_2x16(LCD_2X16, 12, 0, BufferVoltEq);
-		/**/
+
 		/*Mensaje para mostrar el tiempo de la operacion:*/
-		PRINT_LCD_2x16(LCD_2X16, 0, 1, "T-Dig:");
-		PRINT_LCD_2x16(LCD_2X16, 6, 1, BufferMeasuredTime);
+		PRINT_LCD_2x16(LCD_2X16, 0, 1, "T:");
+		PRINT_LCD_2x16(LCD_2X16, 2, 1, BufferMeasuredTime);
+		PRINT_LCD_2x16(LCD_2X16, 7, 1, "uS ");
+
+
+		/*Mensaje para mostrar las cuentas:*/
+		PRINT_LCD_2x16(LCD_2X16, 10, 1, "C:");
+		PRINT_LCD_2x16(LCD_2X16, 12, 1, BufferADC_Count);
+
+		TIM_ClearITPendingBit(TIM3, TIM_IT_Update);
 	}
-}
-
-/*------------------------------------------------------------------------------
-TAREAS:
-------------------------------------------------------------------------------*/
-void _ADC()
-{
-	/*Se inicializa el codigo para medir tiempos:*/
-	DWT->CTRL |= 1; // enable the counter
-	DWT->CYCCNT = 0; // reset the counter
-
-	/*Se resetea la variable del TS:*/
-	TicksADC_Count = 0;
-
-	/*Se lee el valor de cuenta digital en el ADC:*/
-	DigCount = READ_ADC(ADC_Port, ADC_Pin);
-
-	/*Conversion a voltaje equivalente:*/
-	VoltEq = (float) DigCount * MaxVoltADC / MaxDigCount;
-
-	/*Se termina el codigo para medir tiempos y se guarda el resultado:*/
-	MeasuredTime = DWT->CYCCNT;
-	/*Se substrae el ciclo utilizada para transferir CYCCNT a la variable:*/
-	MeasuredTime--;
 }

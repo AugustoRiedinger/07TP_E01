@@ -3,4 +3,4 @@
 *.map
 *.o
 *.su
-*.elf.launch
+*.launch
